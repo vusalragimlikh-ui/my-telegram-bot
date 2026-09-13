@@ -1,0 +1,123 @@
+import os
+import asyncio
+import threading
+import re
+import logging
+from pathlib import Path
+from flask import Flask
+
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.types import FSInputFile
+import yt_dlp
+
+BOT_TOKEN = os.environ.get("8986192949:AAGE-rt_mTIS_QN2DtiC2HOL54iZeLvkbtY")
+DOWNLOAD_DIR = Path("/tmp/downloads")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+
+def sanitize_filename(name: str) -> str:
+    return re.sub(r'[\\/*?:"<>|]', "", name)[:100]
+
+
+def cleanup_downloads():
+    if DOWNLOAD_DIR.exists():
+        for f in DOWNLOAD_DIR.iterdir():
+            try:
+                f.unlink()
+            except Exception:
+                pass
+    else:
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def download_media(url: str):
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': str(DOWNLOAD_DIR / '%(title)s.%(ext)s'),
+        'merge_output_format': 'mp4',
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'max_filesize': 50 * 1024 * 1024,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    }
+    try:
+        loop = asyncio.get_event_loop()
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
+            if 'requested_downloads' in info:
+                filepath = Path(info['requested_downloads'][0]['filepath'])
+            else:
+                filepath = Path(ydl.prepare_filename(info))
+            if not filepath.exists():
+                filepath = filepath.with_suffix('.mp4')
+            return filepath, None
+    except Exception as e:
+        return None, str(e)
+
+
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer("👋 Привет! Отправь ссылку на видео, и я скачаю его для тебя.")
+
+
+@dp.message()
+async def handle_url(message: types.Message):
+    text = message.text.strip() if message.text else ""
+    if not text.startswith(('http://', 'https://')):
+        await message.answer("⚠️ Отправь корректную ссылку.")
+        return
+
+    status_msg = await message.answer("⏳ Скачиваю...")
+    filepath, error = await download_media(text)
+
+    if error or not filepath or not filepath.exists():
+        await status_msg.edit_text(f"❌ Не удалось скачать.\n\n`{(error or 'Файл не найден')[:200]}`")
+        return
+
+    file_size_mb = filepath.stat().st_size / (1024 * 1024)
+    if file_size_mb > 50:
+        await status_msg.edit_text(f"❌ Файл слишком большой ({file_size_mb:.1f} MB). Лимит — 50 MB.")
+        filepath.unlink()
+        return
+
+    await status_msg.edit_text("📤 Отправляю...")
+    try:
+        video = FSInputFile(filepath)
+        await message.answer_video(video, caption="✅ Готово!", supports_streaming=True, filename=sanitize_filename(filepath.name))
+        await status_msg.delete()
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Ошибка отправки: {e}")
+    finally:
+        if filepath.exists():
+            filepath.unlink()
+
+
+def run_bot():
+    cleanup_downloads()
+    logger.info("Бот запущен...")
+    asyncio.run(dp.start_polling(bot))
+
+
+@app.route('/')
+def home():
+    return "Bot is running"
+
+
+@app.route('/health')
+def health():
+    return "OK"
+
+
+if __name__ == "__main__":
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
