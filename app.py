@@ -100,12 +100,6 @@ async def handle_url(message: types.Message):
             filepath.unlink()
 
 
-def run_bot():
-    cleanup_downloads()
-    logger.info("Бот запущен...")
-    asyncio.run(dp.start_polling(bot))
-
-
 @app.route('/')
 def home():
     return "Bot is running"
@@ -117,7 +111,12 @@ def health():
 
 
 if __name__ == "__main__":
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    flask_thread = threading.Thread(
+        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))),
+        daemon=True
+    )
+    flask_thread.start()
+
+    cleanup_downloads()
+    logger.info("Бот запущен...")
+    asyncio.run(dp.start_polling(bot))
