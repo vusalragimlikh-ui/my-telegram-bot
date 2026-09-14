@@ -11,7 +11,7 @@ from aiogram.filters import Command
 from aiogram.types import FSInputFile
 import yt_dlp
 
-BOT_TOKEN = os.environ.get("8986192949:AAGE-rt_mTIS_QN2DtiC2HOL54iZeLvkbtY")
+BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 DOWNLOAD_DIR = Path("/tmp/downloads")
 
 logging.basicConfig(level=logging.INFO)
